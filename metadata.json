@@ -1,0 +1,7 @@
+{
+  "name": "LensLegend",
+  "description": "An AR-style photo tourism app that identifies landmarks, fetches history via Google Search, and narrates the story.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
