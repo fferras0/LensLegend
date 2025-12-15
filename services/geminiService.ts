@@ -2,7 +2,7 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import { GroundingSource, Language } from "../types";
 import { decodeAudioData } from "./audioUtils";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: "AIzaSyBuIvS_y9BCfZLB2xJre70chmzratHF8-Q" });
 
 // Shared AudioContext for the app to reuse
 let audioContext: AudioContext | null = null;
