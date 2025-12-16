@@ -37,38 +37,56 @@ export async function identifyLandmark(base64Data: string, mimeType: string = 'i
           }
         },
         {
-          text: `Identify the landmark in this file. Return ONLY the name of the landmark in ${langName}. If it is not a recognizable landmark or famous place, return 'Unknown'.`
+          text: `Identify the main subject (landmark, place, object, or scene) in this file. Return ONLY the name or short title in ${langName}. Do not use markdown.`
         }
       ]
     }
   });
 
   const text = response.text?.trim();
-  if (!text) throw new Error("Could not identify landmark.");
+  
+  // Default fallback if empty
+  if (!text) {
+     return language === 'ar' ? "مشهد عام" : "General Scene";
+  }
   
   // Cleanup potential markdown or extra punctuation
-  const cleanName = text.replace(/[\*\"]/g, '').trim();
+  let cleanName = text.replace(/[\*\"]/g, '').trim();
   
+  // Handle literal "Unknown" if the model is being lazy
   if (cleanName.toLowerCase() === 'unknown' || cleanName === 'غير معروف') {
-    throw new Error(language === 'ar' 
-      ? "تعذر التعرف على المعلم. يرجى المحاولة مرة أخرى." 
-      : "Could not recognize a landmark. Please try again.");
+    cleanName = language === 'ar' ? "مشهد عام" : "General Scene";
   }
   
   return cleanName;
 }
 
 /**
- * Step 2: Fetch history and facts using Google Search Grounding.
+ * Step 2: Fetch history and facts using Google Search Grounding AND the image.
  */
-export async function getLandmarkDetails(landmarkName: string, language: Language = 'en'): Promise<{ description: string, sources: GroundingSource[] }> {
+export async function getLandmarkDetails(
+  landmarkName: string, 
+  base64Data: string, 
+  mimeType: string, 
+  language: Language = 'en'
+): Promise<{ description: string, sources: GroundingSource[] }> {
   const langName = language === 'ar' ? 'Arabic' : 'English';
   
-  const prompt = `Provide a captivating, concise (max 80 words) summary of the history and significance of ${landmarkName} in ${langName}. It should be suitable for a tourist listening to an audio guide. Do not include markdown formatting like bolding.`;
+  const promptText = `
+    Analyze this image of: ${landmarkName}. 
+    Using the Google Search tool, find interesting facts, history, or information about this subject.
+    Then, provide a captivating, concise (max 80 words) summary in ${langName} that describes what is seen in the image and its significance. 
+    It should be suitable for a tourist listening to an audio guide. Do not include markdown formatting like bolding.
+  `;
 
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
-    contents: prompt,
+    contents: {
+      parts: [
+        { inlineData: { mimeType, data: base64Data } },
+        { text: promptText }
+      ]
+    },
     config: {
       tools: [{ googleSearch: {} }]
     }

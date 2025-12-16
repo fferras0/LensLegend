@@ -6,9 +6,10 @@ import { Chat, GenerateContentResponse } from "@google/genai";
 interface ARResultViewProps {
   data: LandmarkData;
   onReset: () => void;
+  onRegenerateAudio?: () => void;
 }
 
-export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => {
+export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset, onRegenerateAudio }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeTab, setActiveTab] = useState<'info' | 'chat'>('info');
   
@@ -31,6 +32,7 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => 
 
   // UI State
   const [hideUI, setHideUI] = useState(false);
+  const [imageFit, setImageFit] = useState<'cover' | 'contain'>('cover');
   const [copied, setCopied] = useState(false);
 
   const isAr = data.language === 'ar';
@@ -40,7 +42,8 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => 
   // Initialize Audio & Chat
   useEffect(() => {
     if (data.audioBuffer) {
-        playAudio();
+        // Stop any previous audio if component updates
+        stopAudio();
     }
     
     // Init Chat
@@ -202,15 +205,17 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => 
         
         {/* Immersive Background with Pulse */}
         <div 
-          className={`absolute inset-0 bg-center bg-cover bg-no-repeat transition-all duration-700 ease-in-out ${isPlaying ? 'animate-immersive-pulse' : ''}`}
+          className={`absolute inset-0 bg-center bg-no-repeat transition-all duration-700 ease-in-out ${isPlaying ? 'animate-immersive-pulse' : ''}`}
           style={{ 
               backgroundImage: hasVisual ? `url(${currentImage})` : 'none',
+              backgroundSize: imageFit,
               backgroundColor: hasVisual ? 'transparent' : '#0f172a',
+              // Clear view when UI hidden, or when in info tab. Only blur for chat.
               filter: hideUI 
                 ? 'none' 
                 : activeTab === 'chat' 
                     ? 'blur(4px) brightness(0.4)' 
-                    : 'brightness(0.7)'
+                    : 'none'
           }}
           onClick={() => hideUI && setHideUI(false)}
         >
@@ -223,12 +228,12 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => 
             )}
         </div>
 
-        {/* Hide UI Hint (Visible when UI is hidden) */}
+        {/* Hide UI Hint (Visible when UI is hidden) - Replaces button logic */}
         {hideUI && (
-            <div className="absolute top-4 right-4 z-50 animate-pulse bg-black/30 rounded-full p-2" onClick={() => setHideUI(false)}>
-                <svg className="w-6 h-6 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            <div className="absolute top-4 right-4 z-50 animate-pulse bg-black/30 rounded-full p-2 cursor-pointer hover:bg-black/50 transition-colors" onClick={() => setHideUI(false)}>
+                <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    {/* Contract / Exit Fullscreen Icon */}
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
             </div>
         )}
@@ -250,14 +255,35 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => 
                         <span className="text-xs font-mono-tech tracking-widest">{t.back}</span>
                     </button>
                     
-                    {/* Hide UI Button */}
+                    {/* Image Fit/Fill Toggle Button */}
+                    <button 
+                        onClick={() => setImageFit(prev => prev === 'cover' ? 'contain' : 'cover')}
+                        className="flex items-center justify-center w-10 h-10 bg-black/40 backdrop-blur-md border border-white/10 rounded-full hover:bg-cyan-500/20 transition-all text-cyan-400"
+                        title={isAr ? (imageFit === 'cover' ? "إظهار الصورة كاملة" : "ملء الشاشة") : (imageFit === 'cover' ? "Show Full Image" : "Fill Screen")}
+                    >
+                        {imageFit === 'cover' ? (
+                            // Icon for "Fit to Screen" (Arrows pointing in or aspect ratio rect)
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                        ) : (
+                            // Icon for "Fill Screen" (Arrows pointing out)
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                            </svg>
+                        )}
+                    </button>
+
+                    {/* Hide UI / Immersive Button */}
                     <button 
                         onClick={() => setHideUI(true)}
                         className="flex items-center justify-center w-10 h-10 bg-black/40 backdrop-blur-md border border-white/10 rounded-full hover:bg-cyan-500/20 transition-all text-cyan-400"
-                        title={isAr ? "إخفاء الواجهة" : "Hide UI"}
+                        title={isAr ? "وضع الانغماس" : "Immersive Mode"}
                     >
-                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        {/* Eye Icon */}
+                         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                         </svg>
                     </button>
                 </div>
@@ -285,6 +311,13 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => 
         {!hideUI && (
             <div className="flex-1 relative z-20 flex flex-col justify-end p-4 pb-6 overflow-hidden">
                 
+                {/* Credit */}
+                <div className="absolute bottom-2 right-4 z-0 pointer-events-none opacity-50">
+                    <span className="text-[9px] font-mono-tech text-cyan-500">
+                      {isAr ? 'صنع بواسطة فراس' : 'Made by Feras'}
+                    </span>
+                </div>
+
                 {/* Tabs */}
                 <div className="flex gap-4 mb-4 border-b border-white/10 px-2">
                     <button 
@@ -303,7 +336,7 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => 
 
                 {/* INFO PANEL */}
                 {activeTab === 'info' && (
-                    <div className="glass-panel rounded-2xl p-6 shadow-[0_0_50px_rgba(0,0,0,0.5)] border-t border-white/20 animate-slide-up">
+                    <div className="glass-panel rounded-2xl p-6 shadow-[0_0_50px_rgba(0,0,0,0.5)] border-t border-white/20 animate-slide-up relative">
                          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1/3 h-[2px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_10px_rgba(34,211,238,1)]"></div>
                          
                          <div className="flex justify-between items-start mb-2">
@@ -323,8 +356,8 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => 
                             <p className="text-gray-200 text-sm leading-relaxed font-light select-text">{data.description}</p>
                          </div>
 
-                         {/* Audio Player */}
-                         {data.audioBuffer && (
+                         {/* Audio Player OR Generate Button */}
+                         {data.audioBuffer ? (
                             <div className="bg-black/40 rounded-xl p-3 flex items-center gap-4 border border-white/5">
                                 <button 
                                     onClick={togglePlayback}
@@ -352,6 +385,15 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => 
                                     {playbackRate}x
                                 </button>
                             </div>
+                         ) : (
+                             // Generate Audio Button (for saved sessions where audio is missing)
+                             <button 
+                                onClick={onRegenerateAudio}
+                                className="w-full py-3 bg-cyan-900/30 border border-cyan-500/30 rounded-xl text-cyan-400 text-sm font-mono-tech hover:bg-cyan-900/50 transition-all flex items-center justify-center gap-2"
+                             >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                                {isAr ? 'إنشاء دليل صوتي' : 'GENERATE AUDIO GUIDE'}
+                             </button>
                          )}
                     </div>
                 )}

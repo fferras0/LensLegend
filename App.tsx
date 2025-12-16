@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CameraView } from './components/CameraView';
 import { LoadingScreen } from './components/LoadingScreen';
 import { ARResultView } from './components/ARResultView';
@@ -9,7 +9,42 @@ const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [error, setError] = useState<ErrorState | null>(null);
   const [landmarkData, setLandmarkData] = useState<LandmarkData | null>(null);
-  const [language, setLanguage] = useState<Language>('en');
+  const [language, setLanguage] = useState<Language>('ar');
+  const [tempImage, setTempImage] = useState<string | null>(null);
+  const [hasSavedData, setHasSavedData] = useState(false);
+
+  // Load from local storage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('lensLegend_data');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.name) {
+          setLandmarkData(parsed);
+          setHasSavedData(true);
+          if (parsed.language) setLanguage(parsed.language);
+          setAppState(AppState.SHOWING_RESULT);
+        }
+      } catch (e) {
+        console.error("Failed to restore data", e);
+        setHasSavedData(false);
+      }
+    }
+  }, []);
+
+  // Save to local storage when data changes
+  useEffect(() => {
+    if (landmarkData) {
+      // Exclude audioBuffer as it is not serializable
+      const { audioBuffer, ...rest } = landmarkData;
+      try {
+        localStorage.setItem('lensLegend_data', JSON.stringify(rest));
+        setHasSavedData(true);
+      } catch (e) {
+        console.warn("Quota exceeded, cannot save data", e);
+      }
+    }
+  }, [landmarkData]);
   
   // Helper: Convert file to Base64
   const fileToBase64 = (file: File): Promise<string> => {
@@ -50,17 +85,19 @@ const App: React.FC = () => {
       
       // If PDF, we can't display it as a background image. Use a placeholder.
       if (mimeType === 'application/pdf') {
-         // Create a simple placeholder gradient or empty string which ARResultView will handle
          originalImageSrc = ''; 
       }
+      
+      // Set temp image for loading screen
+      setTempImage(originalImageSrc);
 
       // 2. Identify
       const landmarkName = await identifyLandmark(base64Data, mimeType, language);
       
       setAppState(AppState.FETCHING_INFO);
       
-      // 3. Search History
-      const { description, sources } = await getLandmarkDetails(landmarkName, language);
+      // 3. Search History (Pass image for better grounding)
+      const { description, sources } = await getLandmarkDetails(landmarkName, base64Data, mimeType, language);
 
       setAppState(AppState.GENERATING_AUDIO);
 
@@ -73,7 +110,7 @@ const App: React.FC = () => {
         description,
         sources,
         audioBuffer,
-        originalImage: originalImageSrc, // Will be empty for PDF
+        originalImage: originalImageSrc,
         language
       });
       setAppState(AppState.SHOWING_RESULT);
@@ -85,10 +122,43 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRegenerateAudio = async () => {
+    if (!landmarkData) return;
+    setAppState(AppState.GENERATING_AUDIO);
+    // Keep temp image for background if available
+    if (landmarkData.originalImage) setTempImage(landmarkData.originalImage);
+    
+    try {
+      const audioBuffer = await generateNarration(landmarkData.description);
+      setLandmarkData(prev => prev ? { ...prev, audioBuffer } : null);
+      setAppState(AppState.SHOWING_RESULT);
+    } catch (e) {
+      console.error(e);
+      setAppState(AppState.SHOWING_RESULT);
+    }
+  };
+
   const handleReset = () => {
     setAppState(AppState.IDLE);
     setLandmarkData(null);
+    setTempImage(null);
     setError(null);
+    // Do NOT clear localStorage here to allow persistence
+    setHasSavedData(!!localStorage.getItem('lensLegend_data'));
+  };
+  
+  const handleRestoreSession = () => {
+      const saved = localStorage.getItem('lensLegend_data');
+      if (saved) {
+        try {
+            const parsed = JSON.parse(saved);
+            setLandmarkData(parsed);
+            if (parsed.language) setLanguage(parsed.language);
+            setAppState(AppState.SHOWING_RESULT);
+        } catch(e) {
+            console.error("Restore failed", e);
+        }
+      }
   };
 
   const toggleLanguage = () => {
@@ -105,6 +175,8 @@ const App: React.FC = () => {
           onImageCapture={handleImageCapture} 
           language={language}
           onToggleLanguage={toggleLanguage}
+          hasSavedData={hasSavedData}
+          onRestore={handleRestoreSession}
         />
       )}
 
@@ -113,6 +185,7 @@ const App: React.FC = () => {
         appState === AppState.GENERATING_AUDIO) && (
         <LoadingScreen 
             language={language}
+            imageSrc={tempImage || undefined}
             status={
                 appState === AppState.ANALYZING_IMAGE ? "Identifying..." :
                 appState === AppState.FETCHING_INFO ? "Searching..." :
@@ -122,7 +195,11 @@ const App: React.FC = () => {
       )}
 
       {appState === AppState.SHOWING_RESULT && landmarkData && (
-        <ARResultView data={landmarkData} onReset={handleReset} />
+        <ARResultView 
+          data={landmarkData} 
+          onReset={handleReset} 
+          onRegenerateAudio={handleRegenerateAudio}
+        />
       )}
 
       {appState === AppState.ERROR && (

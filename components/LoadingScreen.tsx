@@ -4,9 +4,10 @@ import { Language } from '../types';
 interface LoadingScreenProps {
   status: string;
   language: Language;
+  imageSrc?: string;
 }
 
-export const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, language }) => {
+export const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, language, imageSrc }) => {
   const isAr = language === 'ar';
   const [dots, setDots] = useState('');
 
@@ -29,12 +30,23 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, language }
   if (status.includes("Generating")) mainText = t.generating;
 
   return (
-    <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-sm ${isAr ? 'font-arabic' : 'font-mono-tech'}`} dir={isAr ? 'rtl' : 'ltr'}>
+    <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950 overflow-hidden ${isAr ? 'font-arabic' : 'font-mono-tech'}`} dir={isAr ? 'rtl' : 'ltr'}>
       
-      {/* Scanning Laser Effect */}
-      <div className="absolute top-0 left-0 w-full h-1 bg-cyan-500 shadow-[0_0_20px_rgba(34,211,238,1)] animate-scan-screen"></div>
+      {/* Background Image Layer */}
+      {imageSrc && (
+        <div 
+          className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat opacity-40 blur-md scale-110 transition-transform duration-1000"
+          style={{ backgroundImage: `url(${imageSrc})` }}
+        />
+      )}
+      
+      {/* Dark Overlay */}
+      <div className={`absolute inset-0 z-0 ${imageSrc ? 'bg-slate-950/80' : 'bg-slate-950/90'}`}></div>
 
-      <div className="relative flex flex-col items-center">
+      {/* Scanning Laser Effect */}
+      <div className="absolute top-0 left-0 w-full h-1 bg-cyan-500 shadow-[0_0_20px_rgba(34,211,238,1)] animate-scan-screen z-10"></div>
+
+      <div className="relative z-20 flex flex-col items-center">
         {/* Hexagon Loader */}
         <div className="relative w-24 h-24 mb-8">
            <svg className="w-full h-full text-cyan-500 animate-spin" style={{animationDuration: '3s'}} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
