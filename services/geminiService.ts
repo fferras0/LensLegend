@@ -1,4 +1,4 @@
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI, Modality, Chat } from "@google/genai";
 import { GroundingSource, Language } from "../types";
 import { decodeAudioData } from "./audioUtils";
 
@@ -20,39 +20,39 @@ function getAudioContext(): AudioContext {
 }
 
 /**
- * Step 1: Identify the landmark from an image.
- * Uses gemini-3-pro-preview for high quality image understanding.
+ * Step 1: Identify the landmark from an image or PDF.
  */
-export async function identifyLandmark(imageBase64: string, language: Language = 'en'): Promise<string> {
+export async function identifyLandmark(base64Data: string, mimeType: string = 'image/jpeg', language: Language = 'en'): Promise<string> {
   const langName = language === 'ar' ? 'Arabic' : 'English';
   
+  // Use a model capable of multimodal input (Images/PDFs)
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-preview',
     contents: {
       parts: [
         {
           inlineData: {
-            mimeType: 'image/jpeg',
-            data: imageBase64
+            mimeType: mimeType,
+            data: base64Data
           }
         },
         {
-          text: `Identify the landmark in this image. Return ONLY the name of the landmark in ${langName}. If it is not a recognizable landmark or famous place, return 'Unknown'.`
+          text: `Identify the landmark in this file. Return ONLY the name of the landmark in ${langName}. If it is not a recognizable landmark or famous place, return 'Unknown'.`
         }
       ]
     }
   });
 
   const text = response.text?.trim();
-  if (!text) throw new Error("Could not identify image.");
+  if (!text) throw new Error("Could not identify landmark.");
   
   // Cleanup potential markdown or extra punctuation
   const cleanName = text.replace(/[\*\"]/g, '').trim();
   
   if (cleanName.toLowerCase() === 'unknown' || cleanName === 'غير معروف') {
     throw new Error(language === 'ar' 
-      ? "تعذر التعرف على المعلم في هذه الصورة. يرجى المحاولة مرة أخرى بصورة أوضح." 
-      : "Could not recognize a landmark in this photo. Please try again with a clearer view.");
+      ? "تعذر التعرف على المعلم. يرجى المحاولة مرة أخرى." 
+      : "Could not recognize a landmark. Please try again.");
   }
   
   return cleanName;
@@ -60,7 +60,6 @@ export async function identifyLandmark(imageBase64: string, language: Language =
 
 /**
  * Step 2: Fetch history and facts using Google Search Grounding.
- * Uses gemini-2.5-flash with googleSearch tool.
  */
 export async function getLandmarkDetails(landmarkName: string, language: Language = 'en'): Promise<{ description: string, sources: GroundingSource[] }> {
   const langName = language === 'ar' ? 'Arabic' : 'English';
@@ -91,7 +90,6 @@ export async function getLandmarkDetails(landmarkName: string, language: Languag
     });
   }
 
-  // Deduplicate sources by URI
   const uniqueSources = sources.filter((v, i, a) => a.findIndex(t => t.uri === v.uri) === i);
 
   return { description, sources: uniqueSources };
@@ -99,7 +97,6 @@ export async function getLandmarkDetails(landmarkName: string, language: Languag
 
 /**
  * Step 3: Generate Speech from text.
- * Uses gemini-2.5-flash-preview-tts.
  */
 export async function generateNarration(text: string): Promise<AudioBuffer> {
   const response = await ai.models.generateContent({
@@ -109,7 +106,7 @@ export async function generateNarration(text: string): Promise<AudioBuffer> {
       responseModalities: [Modality.AUDIO],
       speechConfig: {
         voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: 'Kore' } // Kore works well for multilingual
+          prebuiltVoiceConfig: { voiceName: 'Kore' } 
         }
       }
     }
@@ -123,4 +120,60 @@ export async function generateNarration(text: string): Promise<AudioBuffer> {
 
   const ctx = getAudioContext();
   return await decodeAudioData(base64Audio, ctx);
+}
+
+/**
+ * Step 4 (Optional): Upscale/Enhance Image
+ * Uses gemini-2.5-flash-image to edit/regenerate a higher quality version.
+ */
+export async function enhanceImageVisuals(imageBase64: string, mimeType: string = 'image/jpeg'): Promise<string> {
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash-image',
+    contents: {
+      parts: [
+        {
+          inlineData: {
+            mimeType: mimeType,
+            data: imageBase64
+          }
+        },
+        {
+          text: "Generate a high-fidelity, 4k resolution photorealistic version of this image. Dramatically improve sharpness, lighting, and color grading while keeping the subject and composition exactly the same."
+        }
+      ]
+    }
+  });
+
+  // Extract image from response parts
+  let textResponse = '';
+  if (response.candidates?.[0]?.content?.parts) {
+    for (const part of response.candidates[0].content.parts) {
+      if (part.inlineData && part.inlineData.data) {
+         return part.inlineData.data;
+      }
+      if (part.text) {
+        textResponse += part.text;
+      }
+    }
+  }
+  
+  // If we got here, no image was found
+  throw new Error(`Could not enhance image. AI Message: ${textResponse || 'Unknown error'}`);
+}
+
+/**
+ * Step 5: Chat Logic
+ * Creates a chat session for the specific landmark.
+ */
+export function createLandmarkChat(landmarkName: string, description: string, language: Language = 'en'): Chat {
+  const sysInstruction = language === 'ar' 
+    ? `أنت مرشد سياحي خبير ومرح في ${landmarkName}. المستخدم ينظر إلى هذا المعلم الآن. لديك هذه المعلومات عنه: "${description}". أجب عن أسئلة المستخدم باختصار وفائدة.`
+    : `You are an expert, witty tour guide at ${landmarkName}. The user is looking at it right now. You have this context: "${description}". Answer user questions concisely and helpfully.`;
+
+  return ai.chats.create({
+    model: 'gemini-2.5-flash',
+    config: {
+      systemInstruction: sysInstruction
+    }
+  });
 }

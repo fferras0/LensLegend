@@ -1,5 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { LandmarkData } from '../types';
+import { LandmarkData, ChatMessage } from '../types';
+import { createLandmarkChat, enhanceImageVisuals } from '../services/geminiService';
+import { Chat, GenerateContentResponse } from "@google/genai";
 
 interface ARResultViewProps {
   data: LandmarkData;
@@ -8,47 +10,78 @@ interface ARResultViewProps {
 
 export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [activeTab, setActiveTab] = useState<'info' | 'chat'>('info');
+  
+  // Audio Refs & State
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const isAr = data.language === 'ar';
+  const [playbackRate, setPlaybackRate] = useState(1.0);
+  
+  // Chat State
+  const [chatSession, setChatSession] = useState<Chat | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [inputMsg, setInputMsg] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Enhancement State
+  const [currentImage, setCurrentImage] = useState<string>(data.originalImage);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [isEnhanced, setIsEnhanced] = useState(false);
+
+  // UI State
+  const [hideUI, setHideUI] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const isAr = data.language === 'ar';
+  // Check if we have a valid image to display (might be empty if PDF upload)
+  const hasVisual = !!currentImage && !currentImage.includes('application/pdf');
+
+  // Initialize Audio & Chat
   useEffect(() => {
-    // Initialize Audio
     if (data.audioBuffer) {
-        // Auto play on mount
         playAudio();
     }
     
-    return () => {
-      stopAudio();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data.audioBuffer]);
+    // Init Chat
+    const chat = createLandmarkChat(data.name, data.description, data.language);
+    setChatSession(chat);
 
+    // Initial Welcome Message
+    setMessages([{
+        id: 'welcome',
+        role: 'model',
+        text: isAr ? `مرحباً بك في ${data.name}! أنا دليلك الذكي. هل لديك أي أسئلة؟` : `Welcome to ${data.name}! I'm your AI guide. Ask me anything about what you see.`,
+        timestamp: new Date()
+    }]);
+
+    return () => stopAudio();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  // Scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, activeTab]);
+
+  // Audio Logic
   const playAudio = async () => {
     if (!data.audioBuffer) return;
-
     if (!audioContextRef.current) {
         audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
     }
-    
-    // Resume context if needed
     if (audioContextRef.current.state === 'suspended') {
         await audioContextRef.current.resume();
     }
-
     if (sourceNodeRef.current) {
         try { sourceNodeRef.current.stop(); } catch (e) { /* ignore */ }
     }
-
     const source = audioContextRef.current.createBufferSource();
     source.buffer = data.audioBuffer;
+    source.playbackRate.value = playbackRate; // Apply current rate
     source.connect(audioContextRef.current.destination);
-    
     source.onended = () => setIsPlaying(false);
-
-    source.start(0, currentTime);
+    source.start(0);
     sourceNodeRef.current = source;
     setIsPlaying(true);
   };
@@ -59,176 +92,326 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset }) => 
         sourceNodeRef.current = null;
     }
     setIsPlaying(false);
-    setCurrentTime(0);
   };
 
-  const togglePlayback = () => {
-      if (isPlaying) {
-          stopAudio();
-      } else {
-          playAudio();
+  const togglePlayback = () => isPlaying ? stopAudio() : playAudio();
+
+  const cyclePlaybackRate = () => {
+    const rates = [0.75, 1.0, 1.25, 1.5, 2.0];
+    const currentIndex = rates.indexOf(playbackRate);
+    const nextRate = rates[(currentIndex + 1) % rates.length];
+    setPlaybackRate(nextRate);
+    
+    // Apply immediately if playing
+    if (sourceNodeRef.current) {
+        sourceNodeRef.current.playbackRate.value = nextRate;
+    }
+  };
+
+  // Chat Logic
+  const handleSendMessage = async (e?: React.FormEvent) => {
+      e?.preventDefault();
+      if (!inputMsg.trim() || !chatSession || isSending) return;
+
+      const userText = inputMsg;
+      setInputMsg('');
+      setIsSending(true);
+
+      // Add User Message
+      setMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          role: 'user',
+          text: userText,
+          timestamp: new Date()
+      }]);
+
+      try {
+          const response: GenerateContentResponse = await chatSession.sendMessage({ message: userText });
+          const modelText = response.text || (isAr ? "حدث خطأ في الاتصال." : "Connection error.");
+          
+          setMessages(prev => [...prev, {
+            id: (Date.now() + 1).toString(),
+            role: 'model',
+            text: modelText,
+            timestamp: new Date()
+        }]);
+      } catch (err) {
+          console.error(err);
+      } finally {
+          setIsSending(false);
       }
   };
 
-  // Translations
+  // Enhance Logic
+  const handleEnhance = async () => {
+      // Disable enhancement if no visual (e.g. PDF)
+      if (!hasVisual) return;
+
+      if (isEnhanced) {
+          // Revert
+          setCurrentImage(data.originalImage);
+          setIsEnhanced(false);
+          return;
+      }
+
+      if (data.enhancedImage) {
+          setCurrentImage(`data:image/jpeg;base64,${data.enhancedImage}`);
+          setIsEnhanced(true);
+          return;
+      }
+
+      setIsEnhancing(true);
+      try {
+          const parts = data.originalImage.split(',');
+          const base64Data = parts[1];
+          const mimePart = parts[0].split(':')[1];
+          const mimeType = mimePart ? mimePart.split(';')[0] : 'image/jpeg';
+
+          const enhancedBase64 = await enhanceImageVisuals(base64Data, mimeType);
+          
+          data.enhancedImage = enhancedBase64;
+          setCurrentImage(`data:image/jpeg;base64,${enhancedBase64}`);
+          setIsEnhanced(true);
+      } catch (err: any) {
+          console.error("Enhance failed", err);
+          alert(isAr ? `فشل تحسين الصورة: ${err.message}` : `Failed to enhance image: ${err.message}`);
+      } finally {
+          setIsEnhancing(false);
+      }
+  };
+
+  const handleCopyText = () => {
+      navigator.clipboard.writeText(data.description);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+  };
+
+  // UI Text
   const t = {
-    liveGuide: isAr ? 'دليل مباشر' : 'LIVE GUIDE',
-    verified: isAr ? 'مصادر موثوقة' : 'Verified Sources',
-    audio: isAr ? 'دليل صوتي' : 'Audio Guide',
-    playing: isAr ? 'تشغيل' : 'Playing',
-    paused: isAr ? 'متوقف' : 'Paused'
+    back: isAr ? 'عودة' : 'BACK',
+    tabInfo: isAr ? 'معلومات' : 'INFO_LOG',
+    tabChat: isAr ? 'اتصال' : 'COMMS_LINK',
+    enhance: isAr ? 'تحسين' : 'ENHANCE',
+    revert: isAr ? 'أصلي' : 'ORIGINAL',
+    placeholder: isAr ? 'اسأل عن هذا المعلم...' : 'Ask about this landmark...',
+    sending: isAr ? 'إرسال...' : 'SENDING...',
   };
 
   return (
-    <div className={`relative h-screen w-full bg-black overflow-hidden ${isAr ? 'font-arabic' : ''}`} dir={isAr ? 'rtl' : 'ltr'}>
-        <style>{`
-          @keyframes scan {
-            0% { top: 0%; opacity: 0; }
-            15% { opacity: 1; }
-            85% { opacity: 1; }
-            100% { top: 100%; opacity: 0; }
-          }
-          .animate-scan {
-            animation: scan 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-          }
-        `}</style>
-
-        {/* Background Image */}
-        <div 
-          className="absolute inset-0 bg-center bg-cover bg-no-repeat transition-transform duration-[20s] ease-linear scale-100 hover:scale-105"
-          style={{ backgroundImage: `url(${data.originalImage})` }}
-        />
+    <div className={`relative h-screen w-full bg-slate-950 overflow-hidden flex flex-col ${isAr ? 'font-arabic' : 'font-sans'}`} dir={isAr ? 'rtl' : 'ltr'}>
         
-        {/* Dark overlay */}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/80" />
-
-        {/* AR Overlay Layer - Visuals only */}
-        <div className="absolute inset-0 z-0 pointer-events-none">
-            {/* Central Target Reticle */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[280px] h-[280px] sm:w-[350px] sm:h-[350px] border border-white/20 rounded-2xl opacity-80">
-                {/* Glowing Corners */}
-                <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 border-indigo-400 -mt-0.5 -ml-0.5 shadow-[0_0_10px_rgba(99,102,241,0.6)]"></div>
-                <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2 border-indigo-400 -mt-0.5 -mr-0.5 shadow-[0_0_10px_rgba(99,102,241,0.6)]"></div>
-                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2 border-indigo-400 -mb-0.5 -ml-0.5 shadow-[0_0_10px_rgba(99,102,241,0.6)]"></div>
-                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 border-indigo-400 -mb-0.5 -mr-0.5 shadow-[0_0_10px_rgba(99,102,241,0.6)]"></div>
-                
-                {/* Scanning Laser */}
-                <div className="absolute left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-indigo-400 to-transparent animate-scan shadow-[0_0_15px_rgba(99,102,241,1)]"></div>
-                
-                {/* Subtle Grid Pattern inside */}
-                <div className="absolute inset-0 opacity-10" 
-                     style={{backgroundImage: 'radial-gradient(circle, #fff 1px, transparent 1px)', backgroundSize: '20px 20px'}}>
-                </div>
-            </div>
-
-            {/* Feature Points (Simulated Computer Vision dots) */}
-            <div className="absolute top-[35%] left-[30%] w-1.5 h-1.5 bg-indigo-300 rounded-full animate-ping opacity-75" style={{animationDuration: '2s'}}></div>
-            <div className="absolute top-[45%] right-[25%] w-1 h-1 bg-white rounded-full animate-pulse opacity-60" style={{animationDuration: '1.5s'}}></div>
-            <div className="absolute bottom-[40%] left-[40%] w-1 h-1 bg-indigo-200 rounded-full animate-ping opacity-50" style={{animationDelay: '1s'}}></div>
-            
-            {/* Center Pulse Ring */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-32 border border-indigo-500/10 rounded-full animate-ping" style={{animationDuration: '3s'}}></div>
-        </div>
-
-        {/* Top Controls */}
-        <div className="absolute top-0 left-0 w-full p-4 flex justify-between items-start z-10">
-            <button 
-                onClick={onReset}
-                className="bg-black/40 backdrop-blur-md text-white p-2 rounded-full border border-white/20 hover:bg-black/60 transition"
-            >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-            </button>
-            <div className="px-3 py-1 bg-indigo-600/80 backdrop-blur-md rounded-full text-xs font-bold text-white border border-indigo-400/30 shadow-lg flex items-center gap-2">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
-                </span>
-                {t.liveGuide}
-            </div>
-        </div>
-
-        {/* Content Overlay */}
-        <div className="absolute bottom-0 left-0 w-full p-6 pb-10 z-20 flex flex-col gap-4">
-            
-            {/* Title Card */}
-            <div className={isAr ? 'text-right' : 'text-left'}>
-                <h1 className="text-4xl font-bold text-white drop-shadow-md mb-1 leading-tight tracking-tight">
-                    {data.name}
-                </h1>
-                <div className={`h-1 w-12 bg-indigo-500 rounded-full shadow-[0_0_10px_rgba(99,102,241,0.8)] ${isAr ? 'mr-0 ml-auto' : ''}`}></div>
-            </div>
-
-            {/* Info Card */}
-            <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-5 shadow-2xl relative overflow-hidden group">
-                <div className={`absolute top-0 opacity-20 p-3 ${isAr ? 'left-0' : 'right-0'}`}>
-                    <svg className="w-12 h-12 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-                </div>
-                
-                <p className="text-gray-100 text-sm leading-relaxed relative z-10 font-light">
-                    {data.description}
-                </p>
-
-                {/* Sources */}
-                {data.sources && data.sources.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-white/10">
-                    <p className="text-xs text-indigo-300 font-medium mb-1 flex items-center gap-1">
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
-                      {t.verified}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {data.sources.slice(0, 2).map((source, i) => (
-                        <a 
-                          key={i} 
-                          href={source.uri} 
-                          target="_blank" 
-                          rel="noreferrer"
-                          className="text-[10px] bg-black/40 text-gray-300 px-2 py-1 rounded hover:bg-indigo-600/50 transition truncate max-w-[120px]"
-                        >
-                          {source.title}
-                        </a>
-                      ))}
-                    </div>
-                  </div>
-                )}
-            </div>
-
-            {/* Audio Player Control */}
-            {data.audioBuffer && (
-                <div className="flex items-center gap-4 bg-gray-900/80 backdrop-blur-xl p-3 rounded-xl border border-white/10">
-                    <button 
-                        onClick={togglePlayback}
-                        className="w-12 h-12 flex items-center justify-center rounded-full bg-indigo-500 text-white shadow-lg hover:bg-indigo-400 transition-transform active:scale-95"
-                    >
-                        {isPlaying ? (
-                             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-                        ) : (
-                             <svg className={`w-5 h-5 ${isAr ? '-translate-x-0.5' : 'translate-x-0.5'}`} fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                        )}
-                    </button>
-                    <div className="flex-1">
-                        <div className="flex justify-between text-[10px] text-gray-400 mb-1 uppercase tracking-wider font-semibold">
-                            <span>{t.audio}</span>
-                            <span>{isPlaying ? t.playing : t.paused}</span>
-                        </div>
-                        {/* Fake Waveform Visualizer */}
-                        <div className={`flex items-center gap-[2px] h-6 ${isAr ? 'flex-row-reverse' : ''}`}>
-                           {[...Array(20)].map((_, i) => (
-                               <div 
-                                 key={i} 
-                                 className={`w-1 rounded-full transition-all duration-300 ${isPlaying ? 'bg-indigo-400 animate-pulse' : 'bg-gray-600'}`}
-                                 style={{ 
-                                     height: isPlaying ? `${Math.max(20, Math.random() * 100)}%` : '20%',
-                                     animationDelay: `${i * 0.05}s`
-                                 }} 
-                               />
-                           ))}
-                        </div>
-                    </div>
+        {/* Immersive Background with Pulse */}
+        <div 
+          className={`absolute inset-0 bg-center bg-cover bg-no-repeat transition-all duration-700 ease-in-out ${isPlaying ? 'animate-immersive-pulse' : ''}`}
+          style={{ 
+              backgroundImage: hasVisual ? `url(${currentImage})` : 'none',
+              backgroundColor: hasVisual ? 'transparent' : '#0f172a',
+              filter: hideUI 
+                ? 'none' 
+                : activeTab === 'chat' 
+                    ? 'blur(4px) brightness(0.4)' 
+                    : 'brightness(0.7)'
+          }}
+          onClick={() => hideUI && setHideUI(false)}
+        >
+            {!hasVisual && (
+                <div className="absolute inset-0 flex items-center justify-center opacity-20">
+                    <svg className="w-32 h-32 text-cyan-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
                 </div>
             )}
         </div>
+
+        {/* Hide UI Hint (Visible when UI is hidden) */}
+        {hideUI && (
+            <div className="absolute top-4 right-4 z-50 animate-pulse bg-black/30 rounded-full p-2" onClick={() => setHideUI(false)}>
+                <svg className="w-6 h-6 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+            </div>
+        )}
+
+        {/* Scanlines Effect (Hidden when full view) */}
+        {!hideUI && (
+            <div className="absolute inset-0 pointer-events-none z-0" style={{background: 'linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06))', backgroundSize: '100% 2px, 3px 100%'}}></div>
+        )}
+
+        {/* Top Header */}
+        {!hideUI && (
+            <div className="relative z-20 p-4 pt-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent">
+                <div className="flex gap-2">
+                    <button 
+                        onClick={onReset}
+                        className="flex items-center gap-2 bg-black/40 backdrop-blur-md border border-white/10 px-4 py-2 rounded-full hover:bg-cyan-500/20 transition-all text-cyan-400 hover:text-white"
+                    >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                        <span className="text-xs font-mono-tech tracking-widest">{t.back}</span>
+                    </button>
+                    
+                    {/* Hide UI Button */}
+                    <button 
+                        onClick={() => setHideUI(true)}
+                        className="flex items-center justify-center w-10 h-10 bg-black/40 backdrop-blur-md border border-white/10 rounded-full hover:bg-cyan-500/20 transition-all text-cyan-400"
+                        title={isAr ? "إخفاء الواجهة" : "Hide UI"}
+                    >
+                        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                    </button>
+                </div>
+                
+                {hasVisual && (
+                    <button 
+                        onClick={handleEnhance}
+                        disabled={isEnhancing}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${isEnhanced 
+                            ? 'bg-cyan-500 text-black border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.6)]' 
+                            : 'bg-black/50 text-cyan-300 border-cyan-500/30 hover:bg-cyan-900/30'}`}
+                    >
+                        {isEnhancing ? (
+                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+                        ) : (
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+                        )}
+                        <span className="text-[10px] font-mono-tech font-bold uppercase">{isEnhancing ? '...' : (isEnhanced ? t.revert : t.enhance)}</span>
+                    </button>
+                )}
+            </div>
+        )}
+
+        {/* Content Area */}
+        {!hideUI && (
+            <div className="flex-1 relative z-20 flex flex-col justify-end p-4 pb-6 overflow-hidden">
+                
+                {/* Tabs */}
+                <div className="flex gap-4 mb-4 border-b border-white/10 px-2">
+                    <button 
+                        onClick={() => setActiveTab('info')}
+                        className={`pb-2 text-xs font-mono-tech tracking-widest transition-all ${activeTab === 'info' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-gray-500'}`}
+                    >
+                        {t.tabInfo}
+                    </button>
+                    <button 
+                        onClick={() => setActiveTab('chat')}
+                        className={`pb-2 text-xs font-mono-tech tracking-widest transition-all ${activeTab === 'chat' ? 'text-cyan-400 border-b-2 border-cyan-400' : 'text-gray-500'}`}
+                    >
+                        {t.tabChat}
+                    </button>
+                </div>
+
+                {/* INFO PANEL */}
+                {activeTab === 'info' && (
+                    <div className="glass-panel rounded-2xl p-6 shadow-[0_0_50px_rgba(0,0,0,0.5)] border-t border-white/20 animate-slide-up">
+                         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1/3 h-[2px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent shadow-[0_0_10px_rgba(34,211,238,1)]"></div>
+                         
+                         <div className="flex justify-between items-start mb-2">
+                             <h1 className="text-3xl font-bold text-white drop-shadow-md">{data.name}</h1>
+                             {/* Copy Button */}
+                             <button onClick={handleCopyText} className="text-cyan-400 hover:text-white transition-colors" title="Copy text">
+                                {copied ? (
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                ) : (
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                )}
+                             </button>
+                         </div>
+                         
+                         <div className="max-h-[30vh] overflow-y-auto no-scrollbar pr-2 mb-4">
+                            {/* select-text added to allow manual selection */}
+                            <p className="text-gray-200 text-sm leading-relaxed font-light select-text">{data.description}</p>
+                         </div>
+
+                         {/* Audio Player */}
+                         {data.audioBuffer && (
+                            <div className="bg-black/40 rounded-xl p-3 flex items-center gap-4 border border-white/5">
+                                <button 
+                                    onClick={togglePlayback}
+                                    className={`w-10 h-10 flex items-center justify-center rounded-full transition-all flex-shrink-0 ${isPlaying ? 'bg-cyan-500 text-black' : 'bg-white/10 text-white'}`}
+                                >
+                                    {isPlaying ? (
+                                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                                    ) : (
+                                        <svg className={`w-4 h-4 ${isAr ? '-translate-x-0.5' : 'translate-x-0.5'}`} fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                                    )}
+                                </button>
+                                
+                                <div className="flex-1 h-8 flex items-center gap-0.5 opacity-80 overflow-hidden">
+                                    {/* Fake waveform */}
+                                    {[...Array(16)].map((_, i) => (
+                                        <div key={i} className={`flex-1 rounded-full ${isPlaying ? 'bg-cyan-400 animate-pulse' : 'bg-slate-600'}`} style={{height: isPlaying ? Math.random() * 100 + '%' : '20%', animationDelay: i * 0.05 + 's'}}></div>
+                                    ))}
+                                </div>
+                                
+                                {/* Speed Control */}
+                                <button 
+                                    onClick={cyclePlaybackRate}
+                                    className="text-[10px] font-mono-tech text-cyan-300 border border-cyan-500/30 px-2 py-1 rounded hover:bg-cyan-900/40 w-12 text-center"
+                                >
+                                    {playbackRate}x
+                                </button>
+                            </div>
+                         )}
+                    </div>
+                )}
+
+                {/* CHAT PANEL */}
+                {activeTab === 'chat' && (
+                    <div className="glass-panel rounded-2xl flex flex-col h-[50vh] shadow-[0_0_50px_rgba(0,0,0,0.5)] border-t border-white/20 animate-slide-up">
+                        {/* Messages Area */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-3 no-scrollbar">
+                            {messages.map((msg) => (
+                                <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                    <div className={`max-w-[85%] px-3 py-2 rounded-lg text-sm select-text ${msg.role === 'user' ? 'bg-cyan-900/40 border border-cyan-500/30 text-cyan-100' : 'bg-black/40 border border-white/10 text-gray-200'}`}>
+                                        {msg.text}
+                                    </div>
+                                </div>
+                            ))}
+                            <div ref={chatEndRef} />
+                        </div>
+
+                        {/* Input Area */}
+                        <form onSubmit={handleSendMessage} className="p-3 border-t border-white/10 flex gap-2 bg-black/20">
+                            <input 
+                                type="text" 
+                                value={inputMsg}
+                                onChange={(e) => setInputMsg(e.target.value)}
+                                placeholder={t.placeholder}
+                                disabled={isSending}
+                                className="flex-1 bg-black/40 border border-white/10 rounded-lg px-4 py-2 text-sm text-white focus:outline-none focus:border-cyan-500/50 placeholder-gray-500"
+                            />
+                            <button 
+                                type="submit" 
+                                disabled={!inputMsg.trim() || isSending}
+                                className="bg-cyan-600/80 text-white px-3 rounded-lg disabled:opacity-50"
+                            >
+                                <svg className="w-5 h-5 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                            </button>
+                        </form>
+                    </div>
+                )}
+
+            </div>
+        )}
+
+        <style>{`
+            @keyframes slide-up {
+                from { transform: translateY(20px); opacity: 0; }
+                to { transform: translateY(0); opacity: 1; }
+            }
+            .animate-slide-up {
+                animation: slide-up 0.4s ease-out forwards;
+            }
+            @keyframes immersive-pulse {
+                0% { transform: scale(1); filter: brightness(0.7); }
+                50% { transform: scale(1.03); filter: brightness(0.9); }
+                100% { transform: scale(1); filter: brightness(0.7); }
+            }
+            .animate-immersive-pulse {
+                animation: immersive-pulse 6s ease-in-out infinite;
+            }
+        `}</style>
     </div>
   );
 };

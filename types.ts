@@ -10,8 +10,16 @@ export interface LandmarkData {
   description: string;
   sources: GroundingSource[];
   audioBuffer?: AudioBuffer; // Decoded audio ready to play
-  originalImage: string; // Base64
+  originalImage: string; // Base64 or Data URL
+  enhancedImage?: string; // Base64 or Data URL for the upscaled version
   language: Language;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'model';
+  text: string;
+  timestamp: Date;
 }
 
 export enum AppState {
