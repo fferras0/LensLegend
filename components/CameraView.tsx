@@ -1,5 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { Language } from '../types';
+// Import the export service
+import { downloadSingleFileApp } from '../services/exportService';
 
 interface CameraViewProps {
   onImageCapture: (file: File) => void;
@@ -80,10 +82,19 @@ export const CameraView: React.FC<CameraViewProps> = ({
           </div>
         </div>
         
-        <div className="flex flex-col items-end gap-2">
+        <div className="flex items-center gap-2">
+           {/* SRC Button with tech styling on the right side */}
+           <button
+             onClick={downloadSingleFileApp}
+             className="flex items-center justify-center h-8 px-2.5 rounded border border-cyan-500/50 bg-cyan-950/30 text-cyan-300 hover:bg-cyan-500 hover:text-black transition-all group"
+             title="Download Source Code (index.html)"
+           >
+             <span className="text-[10px] font-mono-tech font-bold tracking-tighter group-hover:scale-110 transition-transform">SRC</span>
+           </button>
+
            <button 
             onClick={onToggleLanguage}
-            className="font-mono-tech text-xs border border-cyan-500/50 bg-cyan-950/30 px-3 py-1 text-cyan-300 hover:bg-cyan-500 hover:text-black transition-all"
+            className="font-mono-tech text-xs border border-cyan-500/50 bg-cyan-950/30 px-3 py-1.5 rounded text-cyan-300 hover:bg-cyan-500 hover:text-black transition-all"
           >
             {t.langLabel}
           </button>

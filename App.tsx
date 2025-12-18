@@ -3,7 +3,10 @@ import { CameraView } from './components/CameraView';
 import { LoadingScreen } from './components/LoadingScreen';
 import { ARResultView } from './components/ARResultView';
 import { AppState, ErrorState, LandmarkData, Language } from './types';
-import { identifyLandmark, getLandmarkDetails, generateNarration } from './services/geminiService';
+// Use Groq for Intelligence
+import { identifyLandmark, getLandmarkDetails } from './services/aiService';
+// Keep Gemini for Audio generation (TTS)
+import { generateNarration } from './services/geminiService';
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
@@ -91,17 +94,17 @@ const App: React.FC = () => {
       // Set temp image for loading screen
       setTempImage(originalImageSrc);
 
-      // 2. Identify
+      // 2. Identify (Using Groq)
       const landmarkName = await identifyLandmark(base64Data, mimeType, language);
       
       setAppState(AppState.FETCHING_INFO);
       
-      // 3. Search History (Pass image for better grounding)
+      // 3. Search History (Using Groq)
       const { description, sources } = await getLandmarkDetails(landmarkName, base64Data, mimeType, language);
 
       setAppState(AppState.GENERATING_AUDIO);
 
-      // 4. Generate Audio
+      // 4. Generate Audio (Using Gemini TTS)
       const audioBuffer = await generateNarration(description);
 
       // 5. Done

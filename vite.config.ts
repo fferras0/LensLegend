@@ -14,7 +14,7 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, path.resolve('.'), '');
     
     // المفتاح المقدم
-    const apiKey = "AIzaSyBuIvS_y9BCfZLB2xJre70chmzratHF8-Q";
+    const apiKey = "AIzaSyAKLs2p-VaZMyIztbHYezZSUfkmWBWcgys";
 
     return {
       server: {

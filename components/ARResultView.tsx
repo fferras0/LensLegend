@@ -1,7 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { LandmarkData, ChatMessage } from '../types';
-import { createLandmarkChat, enhanceImageVisuals } from '../services/geminiService';
-import { Chat, GenerateContentResponse } from "@google/genai";
+// Import chat from Groq service
+import { createLandmarkChat } from '../services/aiService';
+// Import enhance from Gemini service (Groq doesn't support this)
+import { enhanceImageVisuals } from '../services/geminiService';
+// Import the export service
+import { downloadSingleFileApp } from '../services/exportService';
 
 interface ARResultViewProps {
   data: LandmarkData;
@@ -19,7 +23,7 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset, onReg
   const [playbackRate, setPlaybackRate] = useState(1.0);
   
   // Chat State
-  const [chatSession, setChatSession] = useState<Chat | null>(null);
+  const [chatSession, setChatSession] = useState<any | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMsg, setInputMsg] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -129,7 +133,8 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset, onReg
       }]);
 
       try {
-          const response: GenerateContentResponse = await chatSession.sendMessage({ message: userText });
+          // Use any type here since we're using Groq shim
+          const response: any = await chatSession.sendMessage({ message: userText });
           const modelText = response.text || (isAr ? "حدث خطأ في الاتصال." : "Connection error.");
           
           setMessages(prev => [...prev, {
@@ -183,6 +188,16 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset, onReg
       }
   };
 
+  const handleDownloadImage = () => {
+    if (!currentImage) return;
+    const link = document.createElement('a');
+    link.href = currentImage;
+    link.download = `lenslegend_${data.name.replace(/\s+/g, '_')}_enhanced.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleCopyText = () => {
       navigator.clipboard.writeText(data.description);
       setCopied(true);
@@ -198,6 +213,7 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset, onReg
     revert: isAr ? 'أصلي' : 'ORIGINAL',
     placeholder: isAr ? 'اسأل عن هذا المعلم...' : 'Ask about this landmark...',
     sending: isAr ? 'إرسال...' : 'SENDING...',
+    download: isAr ? 'تحميل' : 'DOWNLOAD'
   };
 
   return (
@@ -254,6 +270,15 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset, onReg
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
                         <span className="text-xs font-mono-tech tracking-widest">{t.back}</span>
                     </button>
+
+                    {/* SRC Button - Added to result view on the right (in RTL) */}
+                    <button
+                        onClick={downloadSingleFileApp}
+                        className="flex items-center justify-center h-10 px-3 rounded-full border border-cyan-500/50 bg-black/40 backdrop-blur-md text-cyan-400 hover:bg-cyan-500 hover:text-black transition-all group"
+                        title="Download Source Code"
+                    >
+                        <span className="text-[10px] font-mono-tech font-bold tracking-tighter group-hover:scale-110 transition-transform">SRC</span>
+                    </button>
                     
                     {/* Image Fit/Fill Toggle Button */}
                     <button 
@@ -288,22 +313,38 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset, onReg
                     </button>
                 </div>
                 
-                {hasVisual && (
-                    <button 
-                        onClick={handleEnhance}
-                        disabled={isEnhancing}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${isEnhanced 
-                            ? 'bg-cyan-500 text-black border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.6)]' 
-                            : 'bg-black/50 text-cyan-300 border-cyan-500/30 hover:bg-cyan-900/30'}`}
-                    >
-                        {isEnhancing ? (
-                            <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
-                        ) : (
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
-                        )}
-                        <span className="text-[10px] font-mono-tech font-bold uppercase">{isEnhancing ? '...' : (isEnhanced ? t.revert : t.enhance)}</span>
-                    </button>
-                )}
+                <div className="flex gap-2">
+                    {/* Download Button - Circled in your screenshot. Changed to a cleaner "Save Image" icon style. */}
+                    {isEnhanced && (
+                        <button 
+                            onClick={handleDownloadImage}
+                            className="flex items-center justify-center w-10 h-10 bg-cyan-500 text-black border border-cyan-400 rounded-lg shadow-[0_0_15px_rgba(34,211,238,0.6)] hover:bg-cyan-400 transition-all"
+                            title={t.download}
+                        >
+                            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                {/* Improved Download/Save SVG path */}
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4 4m0 0L8 8m4-4v12" />
+                            </svg>
+                        </button>
+                    )}
+
+                    {hasVisual && (
+                        <button 
+                            onClick={handleEnhance}
+                            disabled={isEnhancing}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all ${isEnhanced 
+                                ? 'bg-cyan-500 text-black border-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.6)]' 
+                                : 'bg-black/50 text-cyan-300 border-cyan-500/30 hover:bg-cyan-900/30'}`}
+                        >
+                            {isEnhancing ? (
+                                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
+                            ) : (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.384-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>
+                            )}
+                            <span className="text-[10px] font-mono-tech font-bold uppercase">{isEnhancing ? '...' : (isEnhanced ? t.revert : t.enhance)}</span>
+                        </button>
+                    )}
+                </div>
             </div>
         )}
 
@@ -354,6 +395,29 @@ export const ARResultView: React.FC<ARResultViewProps> = ({ data, onReset, onReg
                          <div className="max-h-[30vh] overflow-y-auto no-scrollbar pr-2 mb-4">
                             {/* select-text added to allow manual selection */}
                             <p className="text-gray-200 text-sm leading-relaxed font-light select-text">{data.description}</p>
+                            
+                            {/* NEW: Sources Section */}
+                            {data.sources && data.sources.length > 0 && (
+                                <div className="mt-4 pt-4 border-t border-white/10">
+                                    <h4 className="text-[10px] font-mono-tech text-cyan-500 mb-2 uppercase tracking-widest">
+                                        {isAr ? 'المصادر (Google)' : 'SOURCES (Google)'}
+                                    </h4>
+                                    <div className="flex flex-col gap-2">
+                                        {data.sources.slice(0, 3).map((source, idx) => (
+                                            <a 
+                                                key={idx} 
+                                                href={source.uri} 
+                                                target="_blank" 
+                                                rel="noopener noreferrer"
+                                                className="text-xs text-gray-400 hover:text-cyan-400 truncate flex items-center gap-2 transition-colors"
+                                            >
+                                                <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                                                {source.title}
+                                            </a>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                          </div>
 
                          {/* Audio Player OR Generate Button */}
