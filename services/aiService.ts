@@ -1,40 +1,47 @@
-import { GoogleGenAI } from "@google/genai";
+import { Groq } from "groq-sdk";
 import { GroundingSource, Language } from "../types";
 
-// Initialize Google GenAI Client with the injected API Key
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const groq = new Groq({
+  apiKey: import.meta.env.VITE_GROQ_API_KEY,
+  dangerouslyAllowBrowser: true,
+});
 
 /**
- * Step 1: Identify the landmark using Gemini 2.5 Flash
+ * Step 1: Identify the landmark using Groq
  */
 export async function identifyLandmark(base64Data: string, mimeType: string = 'image/jpeg', language: Language = 'en'): Promise<string> {
   const langName = language === 'ar' ? 'Arabic' : 'English';
-  
+
   try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: {
-          parts: [
-            {
-              inlineData: {
-                mimeType: mimeType,
-                data: base64Data,
+      const response = await groq.chat.completions.create({
+        model: 'llama-2-90b-vision',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:${mimeType};base64,${base64Data}`
+                }
               },
-            },
-            {
-              text: `Identify the main subject (landmark, place, object, or scene) in this image. Return ONLY the name or short title in ${langName}. Do not use markdown.` 
-            },
-          ],
-        },
+              {
+                type: 'text',
+                text: `Identify the main subject (landmark, place, object, or scene) in this image. Return ONLY the name or short title in ${langName}. Do not use markdown.`
+              }
+            ] as any
+          }
+        ],
+        max_tokens: 100,
       });
 
-      let cleanName = response.text?.trim() || "";
+      let cleanName = response.choices[0]?.message?.content?.toString() || "";
       cleanName = cleanName.replace(/[\*\"]/g, '').trim();
 
       if (!cleanName || cleanName.toLowerCase().includes("cannot") || cleanName.toLowerCase().includes("sorry") || cleanName.toLowerCase() === 'unknown') {
          return language === 'ar' ? "مشهد عام" : "General Scene";
       }
-      
+
       return cleanName;
   } catch (error) {
       console.error("Identification Error:", error);
@@ -43,79 +50,79 @@ export async function identifyLandmark(base64Data: string, mimeType: string = 'i
 }
 
 /**
- * Step 2: Get details using Gemini 2.5 Flash with Search Grounding
+ * Step 2: Get details using Groq
  */
 export async function getLandmarkDetails(
-  landmarkName: string, 
-  base64Data: string, 
-  mimeType: string, 
+  landmarkName: string,
+  base64Data: string,
+  mimeType: string,
   language: Language = 'en'
 ): Promise<{ description: string, sources: GroundingSource[] }> {
   const langName = language === 'ar' ? 'Arabic' : 'English';
-  
-  // Prompt explicitly asks to use the search tool
-  const promptText = `
-    Use the Google Search tool to find the most accurate and recent information about "${landmarkName}".
-    Based on the search results, provide a captivating, concise (max 80 words) summary in ${langName} that describes its historical significance and interesting facts.
-    Focus on what makes it unique. Keep it suitable for spoken audio narration.
-  `;
 
   try {
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: {
-            parts: [
-                { inlineData: { mimeType, data: base64Data } },
-                { text: promptText }
-            ]
-        },
-        // Enable Google Search
-        config: {
-            tools: [{ googleSearch: {} }]
-        }
+      const response = await groq.chat.completions.create({
+        model: 'llama-2-90b-vision',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:${mimeType};base64,${base64Data}`
+                }
+              },
+              {
+                type: 'text',
+                text: `Analyze this image of: ${landmarkName}. Provide a captivating, concise (max 80 words) summary in ${langName} that describes what is seen in the image and its significance. It should be suitable for a tourist listening to an audio guide. Do not include markdown formatting.`
+              }
+            ] as any
+          }
+        ],
+        max_tokens: 200,
       });
 
-      const description = response.text?.trim() || (language === 'ar' ? "لا يتوفر وصف." : "No description available.");
-      
-      const sources: GroundingSource[] = [];
-      const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-      
-      if (chunks) {
-        chunks.forEach((chunk: any) => {
-          if (chunk.web) {
-            sources.push({
-              title: chunk.web.title || "Source",
-              uri: chunk.web.uri
-            });
-          }
-        });
-      }
-      
-      // Deduplicate sources
-      const uniqueSources = sources.filter((v, i, a) => a.findIndex(t => t.uri === v.uri) === i);
+      const description = response.choices[0]?.message?.content?.toString() || (language === 'ar' ? "لا يتوفر وصف." : "No description available.");
 
-      return { description, sources: uniqueSources };
+      return { description, sources: [] };
   } catch (error) {
       console.error("Details Error:", error);
-      return { 
-          description: language === 'ar' ? "حدث خطأ أثناء جلب المعلومات." : "Error fetching details.", 
-          sources: [] 
+      return {
+          description: language === 'ar' ? "حدث خطأ أثناء جلب المعلومات." : "Error fetching details.",
+          sources: []
       };
   }
 }
 
 /**
- * Step 3: Chat Logic using Gemini Chat
+ * Step 3: Chat Logic using Groq
  */
 export function createLandmarkChat(landmarkName: string, description: string, language: Language = 'en'): any {
-  const sysInstruction = language === 'ar' 
+  const sysInstruction = language === 'ar'
     ? `أنت مرشد سياحي خبير ومرح في ${landmarkName}. لديك هذه المعلومات: "${description}". أجب عن أسئلة المستخدم باختصار وفائدة.`
     : `You are an expert, witty tour guide at ${landmarkName}. Context: "${description}". Answer user questions concisely and helpfully.`;
 
-  return ai.chats.create({
-    model: 'gemini-2.5-flash',
-    config: {
-        systemInstruction: sysInstruction
+  return {
+    sendMessage: async (msg: any) => {
+      const response = await groq.chat.completions.create({
+        model: 'mixtral-8x7b-32768',
+        messages: [
+          {
+            role: 'system',
+            content: sysInstruction
+          },
+          {
+            role: 'user',
+            content: msg.message
+          }
+        ],
+        max_tokens: 300,
+      });
+
+      return {
+        text: response.choices[0]?.message?.content || (language === 'ar' ? "آسف، لم أستطع الرد." : "Sorry, I couldn't respond.")
+      };
     }
-  });
+  };
 }
