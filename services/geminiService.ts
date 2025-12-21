@@ -2,7 +2,7 @@ import { GoogleGenAI, Modality, Chat } from "@google/genai";
 import { GroundingSource, Language } from "../types";
 import { decodeAudioData } from "./audioUtils";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 
 // Shared AudioContext for the app to reuse
 let audioContext: AudioContext | null = null;
