@@ -1,17 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
 import { Language } from "../types";
 import { decodeAudioData } from "./audioUtils";
-// في بداية الملف، أضف:
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 
-// وتأكد من أن Groq يستخدم مفتاحه الخاص:
-const groq = new Groq({
-  apiKey: import.meta.env.VITE_GROQ_API_KEY,
-  dangerouslyAllowBrowser: true,
-});
+// استخدام المفتاح مباشرة كـ fallback
+const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || 'AIzaSyAKLs2p-VaZMyIztbHYezZSUfkmWBWcgys';
 
 const ai = new GoogleGenAI({
-  apiKey: import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GROQ_API_KEY
+  apiKey: GEMINI_KEY
 });
 
 let audioContext: AudioContext | null = null;
@@ -28,9 +23,6 @@ function getAudioContext(): AudioContext {
   return audioContext;
 }
 
-/**
- * Generate Speech from text using Gemini TTS
- */
 export async function generateNarration(text: string): Promise<AudioBuffer> {
   try {
     const response = await ai.models.generateContent({
@@ -67,9 +59,6 @@ export async function generateNarration(text: string): Promise<AudioBuffer> {
   }
 }
 
-/**
- * Enhance image using Gemini's image generation
- */
 export async function enhanceImageVisuals(imageBase64: string, mimeType: string = 'image/jpeg'): Promise<string> {
   try {
     const response = await ai.models.generateContent({
@@ -89,7 +78,6 @@ export async function enhanceImageVisuals(imageBase64: string, mimeType: string 
       }
     });
 
-    // Extract the enhanced image from response
     if (response.candidates?.[0]?.content?.parts) {
       for (const part of response.candidates[0].content.parts) {
         if (part.inlineData?.data) {
