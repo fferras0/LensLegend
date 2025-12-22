@@ -1,10 +1,15 @@
 import { Groq } from "groq-sdk";
 import { GroundingSource, Language } from "../types";
 
+// إضافة fallback للمفتاح
+const GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY || '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';
+
 const groq = new Groq({
-  apiKey: import.meta.env.VITE_GROQ_API_KEY,
+  apiKey: GROQ_KEY,
   dangerouslyAllowBrowser: true,
 });
+
+// باقي الكود كما هو...
 
 /**
  * Step 1: Identify the landmark using Groq with enhanced prompt
