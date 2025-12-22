@@ -1,7 +1,7 @@
 import { Groq } from "groq-sdk";
 import { GroundingSource, Language } from "../types";
 
-// إضافة fallback للمفتاح
+// استخدام المفتاح مع fallback قوي
 const GROQ_KEY = import.meta.env.VITE_GROQ_API_KEY || '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';
 
 const groq = new Groq({
@@ -9,13 +9,10 @@ const groq = new Groq({
   dangerouslyAllowBrowser: true,
 });
 
-// باقي الكود كما هو...
-
 /**
  * Step 1: Identify the landmark using Groq with enhanced prompt
  */
 export async function identifyLandmark(base64Data: string, mimeType: string = 'image/jpeg', language: Language = 'en'): Promise<string> {
-  const langName = language === 'ar' ? 'Arabic' : 'English';
   const promptText = language === 'ar' 
     ? 'حدد الموضوع الرئيسي في هذه الصورة (معلم، مكان، كائن، أو مشهد). أعط اسماً مختصراً فقط بدون أي شرح إضافي.'
     : 'Identify the main subject in this image (landmark, place, object, or scene). Provide ONLY a short name without any additional explanation or markdown.';
@@ -67,7 +64,6 @@ export async function getLandmarkDetails(
   mimeType: string,
   language: Language = 'en'
 ): Promise<{ description: string, sources: GroundingSource[] }> {
-  const langName = language === 'ar' ? 'Arabic' : 'English';
   const promptText = language === 'ar'
     ? `قدم وصفاً سياحياً جذاباً ومختصراً (لا يتجاوز 80 كلمة) بالعربية عن: ${landmarkName}. ركز على الحقائق المثيرة والتاريخ والأهمية. اجعله مناسباً لدليل صوتي سياحي.`
     : `Provide a captivating, concise tourist description (max 80 words) in English about: ${landmarkName}. Focus on interesting facts, history, and significance. Make it suitable for an audio tour guide.`;
