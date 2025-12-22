@@ -7,17 +7,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export default defineConfig({
-  base: '/LensLegend/', // اسم الريبو على GitHub
+  base: '/LensLegend/',
   server: {
     port: 3000,
     host: '0.0.0.0',
   },
   plugins: [react()],
-  define: {
-    // تضمين المفاتيح مباشرة في البناء
-    'import.meta.env.VITE_GEMINI_API_KEY': JSON.stringify('AIzaSyAKLs2p-VaZMyIztbHYezZSUfkmWBWcgys'),
-    'import.meta.env.VITE_GROQ_API_KEY': JSON.stringify('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'),
-  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
@@ -28,5 +23,10 @@ export default defineConfig({
     assetsDir: 'assets',
     sourcemap: false,
     minify: 'terser',
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      }
+    }
   }
 });
