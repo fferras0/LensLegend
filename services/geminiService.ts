@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { Language } from "../types";
 import { decodeAudioData } from "./audioUtils";
 
-// استخدام المفتاح مباشرة كـ fallback
+// استخدام المفتاح مع fallback قوي
 const GEMINI_KEY = import.meta.env.VITE_GEMINI_API_KEY || 'AIzaSyAKLs2p-VaZMyIztbHYezZSUfkmWBWcgys';
 
 const ai = new GoogleGenAI({
