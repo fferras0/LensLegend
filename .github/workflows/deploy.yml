@@ -10,7 +10,6 @@ permissions:
   pages: write
   id-token: write
 
-# منع عدة deployments في نفس الوقت
 concurrency:
   group: "pages"
   cancel-in-progress: false
@@ -33,15 +32,11 @@ jobs:
         
       - name: Build
         run: npm run build
-        env:
-          VITE_GEMINI_API_KEY: ${{ secrets.VITE_GEMINI_API_KEY }}
-          VITE_GROQ_API_KEY: ${{ secrets.VITE_GROQ_API_KEY }}
+        # لا حاجة لـ env vars هنا - المفاتيح مضمنة في الكود
       
-      # إنشاء ملف 404.html (ضروري لتطبيقات SPA)
       - name: Create 404.html
         run: cp dist/index.html dist/404.html
       
-      # إضافة ملف .nojekyll (ضروري)
       - name: Add .nojekyll
         run: touch dist/.nojekyll
         
