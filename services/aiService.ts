@@ -7,14 +7,17 @@ const groq = new Groq({
 });
 
 /**
- * Step 1: Identify the landmark using Groq
+ * Step 1: Identify the landmark using Groq with enhanced prompt
  */
 export async function identifyLandmark(base64Data: string, mimeType: string = 'image/jpeg', language: Language = 'en'): Promise<string> {
   const langName = language === 'ar' ? 'Arabic' : 'English';
+  const promptText = language === 'ar' 
+    ? 'حدد الموضوع الرئيسي في هذه الصورة (معلم، مكان، كائن، أو مشهد). أعط اسماً مختصراً فقط بدون أي شرح إضافي.'
+    : 'Identify the main subject in this image (landmark, place, object, or scene). Provide ONLY a short name without any additional explanation or markdown.';
 
   try {
       const response = await groq.chat.completions.create({
-        model: 'llama-2-90b-vision',
+        model: 'llama-3.2-90b-vision-preview',
         messages: [
           {
             role: 'user',
@@ -27,12 +30,13 @@ export async function identifyLandmark(base64Data: string, mimeType: string = 'i
               },
               {
                 type: 'text',
-                text: `Identify the main subject (landmark, place, object, or scene) in this image. Return ONLY the name or short title in ${langName}. Do not use markdown.`
+                text: promptText
               }
             ] as any
           }
         ],
         max_tokens: 100,
+        temperature: 0.3,
       });
 
       let cleanName = response.choices[0]?.message?.content?.toString() || "";
@@ -50,7 +54,7 @@ export async function identifyLandmark(base64Data: string, mimeType: string = 'i
 }
 
 /**
- * Step 2: Get details using Groq
+ * Step 2: Get details using Groq with web search simulation
  */
 export async function getLandmarkDetails(
   landmarkName: string,
@@ -59,10 +63,13 @@ export async function getLandmarkDetails(
   language: Language = 'en'
 ): Promise<{ description: string, sources: GroundingSource[] }> {
   const langName = language === 'ar' ? 'Arabic' : 'English';
+  const promptText = language === 'ar'
+    ? `قدم وصفاً سياحياً جذاباً ومختصراً (لا يتجاوز 80 كلمة) بالعربية عن: ${landmarkName}. ركز على الحقائق المثيرة والتاريخ والأهمية. اجعله مناسباً لدليل صوتي سياحي.`
+    : `Provide a captivating, concise tourist description (max 80 words) in English about: ${landmarkName}. Focus on interesting facts, history, and significance. Make it suitable for an audio tour guide.`;
 
   try {
       const response = await groq.chat.completions.create({
-        model: 'llama-2-90b-vision',
+        model: 'llama-3.2-90b-vision-preview',
         messages: [
           {
             role: 'user',
@@ -75,17 +82,24 @@ export async function getLandmarkDetails(
               },
               {
                 type: 'text',
-                text: `Analyze this image of: ${landmarkName}. Provide a captivating, concise (max 80 words) summary in ${langName} that describes what is seen in the image and its significance. It should be suitable for a tourist listening to an audio guide. Do not include markdown formatting.`
+                text: promptText
               }
             ] as any
           }
         ],
-        max_tokens: 200,
+        max_tokens: 300,
+        temperature: 0.7,
       });
 
       const description = response.choices[0]?.message?.content?.toString() || (language === 'ar' ? "لا يتوفر وصف." : "No description available.");
 
-      return { description, sources: [] };
+      // Mock sources (since Groq doesn't provide grounding)
+      const sources: GroundingSource[] = [
+        { title: "Wikipedia", uri: `https://en.wikipedia.org/wiki/${encodeURIComponent(landmarkName)}` },
+        { title: "Google Search", uri: `https://www.google.com/search?q=${encodeURIComponent(landmarkName)}` }
+      ];
+
+      return { description: description.replace(/[\*]/g, ''), sources };
   } catch (error) {
       console.error("Details Error:", error);
       return {
@@ -96,33 +110,50 @@ export async function getLandmarkDetails(
 }
 
 /**
- * Step 3: Chat Logic using Groq
+ * Step 3: Chat Logic using Groq with conversation history
  */
 export function createLandmarkChat(landmarkName: string, description: string, language: Language = 'en'): any {
   const sysInstruction = language === 'ar'
-    ? `أنت مرشد سياحي خبير ومرح في ${landmarkName}. لديك هذه المعلومات: "${description}". أجب عن أسئلة المستخدم باختصار وفائدة.`
-    : `You are an expert, witty tour guide at ${landmarkName}. Context: "${description}". Answer user questions concisely and helpfully.`;
+    ? `أنت مرشد سياحي خبير ومرح ومفيد في ${landmarkName}. المعلومات المتاحة: "${description}". أجب عن أسئلة الزوار باختصار ووضوح ومتعة. استخدم أسلوباً ودياً ومشوقاً.`
+    : `You are an expert, witty, and helpful tour guide at ${landmarkName}. Available info: "${description}". Answer visitor questions concisely, clearly, and engagingly. Use a friendly and interesting tone.`;
+
+  const conversationHistory: any[] = [];
 
   return {
     sendMessage: async (msg: any) => {
-      const response = await groq.chat.completions.create({
-        model: 'mixtral-8x7b-32768',
-        messages: [
-          {
-            role: 'system',
-            content: sysInstruction
-          },
-          {
-            role: 'user',
-            content: msg.message
-          }
-        ],
-        max_tokens: 300,
+      conversationHistory.push({
+        role: 'user',
+        content: msg.message
       });
 
-      return {
-        text: response.choices[0]?.message?.content || (language === 'ar' ? "آسف، لم أستطع الرد." : "Sorry, I couldn't respond.")
-      };
+      const messages = [
+        {
+          role: 'system',
+          content: sysInstruction
+        },
+        ...conversationHistory
+      ];
+
+      try {
+        const response = await groq.chat.completions.create({
+          model: 'llama-3.1-70b-versatile',
+          messages: messages,
+          max_tokens: 400,
+          temperature: 0.8,
+        });
+
+        const aiResponse = response.choices[0]?.message?.content || (language === 'ar' ? "آسف، لم أستطع الرد." : "Sorry, I couldn't respond.");
+        
+        conversationHistory.push({
+          role: 'assistant',
+          content: aiResponse
+        });
+
+        return { text: aiResponse };
+      } catch (error) {
+        console.error("Chat Error:", error);
+        return { text: language === 'ar' ? "حدث خطأ في المحادثة." : "Chat error occurred." };
+      }
     }
   };
 }
