@@ -10,6 +10,7 @@ interface LoadingScreenProps {
 export const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, language, imageSrc }) => {
   const isAr = language === 'ar';
   const [dots, setDots] = useState('');
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -17,8 +18,17 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, language, 
     }, 400);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const progressInterval = setInterval(() => {
+      setProgress(prev => {
+        if (prev >= 90) return prev;
+        return prev + Math.random() * 15;
+      });
+    }, 300);
+    return () => clearInterval(progressInterval);
+  }, []);
   
-  // Cyberpunk translations
   const t = {
     identifying: isAr ? 'تحليل الصورة' : 'ANALYZING_VISUAL_DATA',
     searching: isAr ? 'جاري استدعاء المعلومات' : 'FETCHING_DATABASE_HISTORY',
@@ -26,8 +36,8 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, language, 
   };
 
   let mainText = t.identifying;
-  if (status.includes("Searching")) mainText = t.searching;
-  if (status.includes("Generating")) mainText = t.generating;
+  if (status.includes("Searching") || status.includes("FETCHING")) mainText = t.searching;
+  if (status.includes("Generating") || status.includes("GENERATING")) mainText = t.generating;
 
   return (
     <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950 overflow-hidden ${isAr ? 'font-arabic' : 'font-mono-tech'}`} dir={isAr ? 'rtl' : 'ltr'}>
@@ -46,29 +56,38 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, language, 
       {/* Scanning Laser Effect */}
       <div className="absolute top-0 left-0 w-full h-1 bg-cyan-500 shadow-[0_0_20px_rgba(34,211,238,1)] animate-scan-screen z-10"></div>
 
-      <div className="relative z-20 flex flex-col items-center">
+      <div className="relative z-20 flex flex-col items-center w-full max-w-md px-6">
         {/* Hexagon Loader */}
-        <div className="relative w-24 h-24 mb-8">
-           <svg className="w-full h-full text-cyan-500 animate-spin" style={{animationDuration: '3s'}} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1">
+        <div className="relative w-28 h-28 mb-8">
+           <svg className="w-full h-full text-cyan-500 animate-spin" style={{animationDuration: '2s'}} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
              <path d="M12 2l8.66 5v10L12 22l-8.66-5V7L12 2z" strokeLinecap="round" strokeLinejoin="round" />
            </svg>
            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="w-12 h-12 bg-cyan-400/20 rounded-full animate-ping"></div>
+              <div className="w-14 h-14 bg-cyan-400/20 rounded-full animate-ping"></div>
            </div>
         </div>
 
         {/* Text Terminal Effect */}
-        <h3 className="text-xl text-cyan-400 font-bold tracking-widest uppercase text-shadow-glow">
+        <h3 className="text-xl text-cyan-400 font-bold tracking-widest uppercase text-shadow-glow mb-2 text-center">
           {isAr ? mainText : `>> ${mainText}`}
         </h3>
         
-        <p className="mt-2 text-xs text-cyan-700 font-mono-tech">
-          Processing{dots}
+        <p className="mt-1 text-xs text-cyan-700 font-mono-tech">
+          {isAr ? 'معالجة' : 'Processing'}{dots}
         </p>
         
-        {/* Progress Bar */}
-        <div className="mt-8 w-64 h-1 bg-slate-800 rounded-full overflow-hidden">
-          <div className="h-full bg-cyan-500 animate-progress shadow-[0_0_10px_rgba(34,211,238,0.8)]"></div>
+        {/* Enhanced Progress Bar */}
+        <div className="mt-8 w-full max-w-xs">
+          <div className="h-2 bg-slate-800 rounded-full overflow-hidden shadow-inner">
+            <div 
+              className="h-full bg-gradient-to-r from-cyan-500 to-cyan-300 rounded-full shadow-[0_0_10px_rgba(34,211,238,0.8)] transition-all duration-300 ease-out"
+              style={{ width: `${progress}%` }}
+            ></div>
+          </div>
+          <div className="flex justify-between mt-2 text-[10px] text-cyan-600 font-mono-tech">
+            <span>{isAr ? 'جاري...' : 'Processing...'}</span>
+            <span>{Math.round(progress)}%</span>
+          </div>
         </div>
       </div>
 
@@ -82,16 +101,8 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, language, 
         .animate-scan-screen {
           animation: scan-screen 2.5s ease-in-out infinite;
         }
-        @keyframes progress {
-          0% { width: 0%; }
-          50% { width: 70%; }
-          100% { width: 100%; }
-        }
-        .animate-progress {
-          animation: progress 2s infinite linear;
-        }
         .text-shadow-glow {
-          text-shadow: 0 0 8px rgba(34, 211, 238, 0.5);
+          text-shadow: 0 0 10px rgba(34, 211, 238, 0.6), 0 0 20px rgba(34, 211, 238, 0.4);
         }
       `}</style>
     </div>
