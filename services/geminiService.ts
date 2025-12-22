@@ -1,6 +1,14 @@
 import { GoogleGenAI } from "@google/genai";
 import { Language } from "../types";
 import { decodeAudioData } from "./audioUtils";
+// في بداية الملف، أضف:
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+
+// وتأكد من أن Groq يستخدم مفتاحه الخاص:
+const groq = new Groq({
+  apiKey: import.meta.env.VITE_GROQ_API_KEY,
+  dangerouslyAllowBrowser: true,
+});
 
 const ai = new GoogleGenAI({
   apiKey: import.meta.env.VITE_GEMINI_API_KEY || import.meta.env.VITE_GROQ_API_KEY
