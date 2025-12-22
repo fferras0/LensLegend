@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { Language } from "../types";
 import { decodeAudioData } from "./audioUtils";
 
 // استخدام المفتاح مع fallback قوي - تأكد من وجود المفتاح
