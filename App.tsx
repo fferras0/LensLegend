@@ -12,9 +12,17 @@ const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
   const [error, setError] = useState<ErrorState | null>(null);
   const [landmarkData, setLandmarkData] = useState<LandmarkData | null>(null);
-  const [language, setLanguage] = useState<Language>('ar');
+  const [language, setLanguage] = useState<Language>(() => {
+    const saved = localStorage.getItem('lensLegend_language');
+    return (saved as Language) || 'ar';
+  });
   const [tempImage, setTempImage] = useState<string | null>(null);
   const [hasSavedData, setHasSavedData] = useState(false);
+
+  // Save language preference
+  useEffect(() => {
+    localStorage.setItem('lensLegend_language', language);
+  }, [language]);
 
   // Load from local storage on mount
   useEffect(() => {
