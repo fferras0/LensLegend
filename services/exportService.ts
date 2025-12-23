@@ -58,7 +58,7 @@ export function showExportOptions() {
 }
 
 export function downloadSingleFileApp() {
-  // FIX: Use import.meta.env instead of process.env for Vite
+  // استخدام import.meta.env بدلاً من process.env لبيئة Vite
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "AIzaSyAKLs2p-VaZMyIztbHYezZSUfkmWBWcgys";
   
   // Generates a simplified Standalone version to avoid file size issues and complexity
@@ -86,7 +86,7 @@ export function downloadSingleFileApp() {
       </p>
       <div class="text-left bg-black/40 p-4 rounded-lg mb-6 border border-white/10">
         <p class="text-xs text-gray-500 font-mono mb-2">CONFIG:</p>
-        <p class="text-sm text-cyan-300 break-all">API_KEY_HZ: ${apiKey.substring(0, 5)}...${apiKey.substring(apiKey.kh - 5)}</p>
+        <p class="text-sm text-cyan-300 break-all">API_KEY_HZ: ${apiKey.substring(0, 5)}...${apiKey.substring(apiKey.length - 5)}</p>
       </div>
       <a href="https://fferras0.github.io/LensLegend/" class="btn hover:bg-cyan-300 transition">
         Launch Web App
